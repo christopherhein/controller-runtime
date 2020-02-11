@@ -316,6 +316,87 @@ func New(config *rest.Config, options Options) (Manager, error) {
 	}, nil
 }
 
+// ManagerConfiguration defines what the ComponentConfig object for ControllerRuntime needs to support
+type ManagerConfiguration interface {
+	// GetSyncPeriod determines the minimum frequency at which watched resources are
+	// reconciled. A lower period will correct entropy more quickly, but reduce
+	// responsiveness to change if there are many watched resources. Change this
+	// value only if you know what you are doing. Defaults to 10 hours if unset.
+	// there will a 10 percent jitter between the SyncPeriod of all controllers
+	// so that all controllers will not send list requests simultaneously.
+	GetSyncPeriod() *time.Duration
+
+	// GetLeaderElection determines whether or not to use leader election when
+	// starting the manager.
+	GetLeaderElection() bool
+
+	// GetLeaderElectionNamespace determines the namespace in which the leader
+	// election configmap will be created.
+	GetLeaderElectionNamespace() string
+
+	// GetLeaderElectionID determines the name of the configmap that leader election
+	// will use for holding the leader lock.
+	GetLeaderElectionID() string
+
+	// GetLeaseDuration is the duration that non-leader candidates will
+	// wait to force acquire leadership. This is measured against time of
+	// last observed ack. Default is 15 seconds.
+	GetLeaseDuration() *time.Duration
+	// RenewDeadline is the duration that the acting master will retry
+	// refreshing leadership before giving up. Default is 10 seconds.
+	GetRenewDeadline() *time.Duration
+	// GetRetryPeriod is the duration the LeaderElector clients should wait
+	// between tries of actions. Default is 2 seconds.
+	GetRetryPeriod() *time.Duration
+
+	// GetNamespace if specified restricts the manager's cache to watch objects in
+	// the desired namespace Defaults to all namespaces
+	//
+	// Note: If a namespace is specified, controllers can still Watch for a
+	// cluster-scoped resource (e.g Node).  For namespaced resources the cache
+	// will only hold objects from the desired namespace.
+	GetNamespace() string
+
+	// GetMetricsBindAddress is the TCP address that the controller should bind to
+	// for serving prometheus metrics.
+	// It can be set to "0" to disable the metrics serving.
+	GetMetricsBindAddress() string
+
+	// GetHealthProbeBindAddress is the TCP address that the controller should bind to
+	// for serving health probes
+	GetHealthProbeBindAddress() string
+
+	// GetReadinessEndpointName probe endpoint name, defaults to "readyz"
+	GetReadinessEndpointName() string
+
+	// GetLivenessEndpointName probe endpoint name, defaults to "healthz"
+	GetLivenessEndpointName() string
+
+	// GetPort is the port that the webhook server serves at.
+	// It is used to set webhook.Server.Port.
+	GetPort() int
+	// GetHost is the hostname that the webhook server binds to.
+	// It is used to set webhook.Server.Host.
+	GetHost() string
+
+	// GetCertDir is the directory that contains the server key and certificate.
+	// if not set, webhook server would look up the server key and certificate in
+	// {TempDir}/k8s-webhook-server/serving-certs. The server key and certificate
+	// must be named tls.key and tls.crt, respectively.
+	GetCertDir() string
+}
+
+// NewFromComponentConfig will use the component
+func NewFromComponentConfig(config *rest.Config, managerconfig ManagerConfiguration) (Manager, error) {
+	options := Options{}
+	// loop though getters to set Options params
+	if managerconfig.GetLeaderElection() {
+		managerconfig.GetLeaderElection()
+	}
+
+	return New(config, options)
+}
+
 // defaultNewClient creates the default caching client
 func defaultNewClient(cache cache.Cache, config *rest.Config, options client.Options) (client.Client, error) {
 	// Create the Client for Write operations.
