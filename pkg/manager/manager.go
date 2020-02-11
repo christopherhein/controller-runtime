@@ -18,6 +18,7 @@ package manager
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -314,6 +316,158 @@ func New(config *rest.Config, options Options) (Manager, error) {
 		readinessEndpointName: options.ReadinessEndpointName,
 		livenessEndpointName:  options.LivenessEndpointName,
 	}, nil
+}
+
+// ManagerConfiguration defines what the ComponentConfig object for ControllerRuntime needs to support
+type ManagerConfiguration interface {
+	// GetSyncPeriod determines the minimum frequency at which watched resources are
+	// reconciled. A lower period will correct entropy more quickly, but reduce
+	// responsiveness to change if there are many watched resources. Change this
+	// value only if you know what you are doing. Defaults to 10 hours if unset.
+	// there will a 10 percent jitter between the SyncPeriod of all controllers
+	// so that all controllers will not send list requests simultaneously.
+	GetSyncPeriod() *time.Duration
+
+	// GetLeaderElection determines whether or not to use leader election when
+	// starting the manager.
+	GetLeaderElection() bool
+
+	// GetLeaderElectionNamespace determines the namespace in which the leader
+	// election configmap will be created.
+	GetLeaderElectionNamespace() string
+
+	// GetLeaderElectionID determines the name of the configmap that leader election
+	// will use for holding the leader lock.
+	GetLeaderElectionID() string
+
+	// GetLeaseDuration is the duration that non-leader candidates will
+	// wait to force acquire leadership. This is measured against time of
+	// last observed ack. Default is 15 seconds.
+	GetLeaseDuration() *time.Duration
+	// RenewDeadline is the duration that the acting master will retry
+	// refreshing leadership before giving up. Default is 10 seconds.
+	GetRenewDeadline() *time.Duration
+	// GetRetryPeriod is the duration the LeaderElector clients should wait
+	// between tries of actions. Default is 2 seconds.
+	GetRetryPeriod() *time.Duration
+
+	// GetNamespace if specified restricts the manager's cache to watch objects in
+	// the desired namespace Defaults to all namespaces
+	//
+	// Note: If a namespace is specified, controllers can still Watch for a
+	// cluster-scoped resource (e.g Node).  For namespaced resources the cache
+	// will only hold objects from the desired namespace.
+	GetNamespace() string
+
+	// GetMetricsBindAddress is the TCP address that the controller should bind to
+	// for serving prometheus metrics.
+	// It can be set to "0" to disable the metrics serving.
+	GetMetricsBindAddress() string
+
+	// GetHealthProbeBindAddress is the TCP address that the controller should bind to
+	// for serving health probes
+	GetHealthProbeBindAddress() string
+
+	// GetReadinessEndpointName probe endpoint name, defaults to "readyz"
+	GetReadinessEndpointName() string
+
+	// GetLivenessEndpointName probe endpoint name, defaults to "healthz"
+	GetLivenessEndpointName() string
+
+	// GetPort is the port that the webhook server serves at.
+	// It is used to set webhook.Server.Port.
+	GetPort() *int
+	// GetHost is the hostname that the webhook server binds to.
+	// It is used to set webhook.Server.Host.
+	GetHost() string
+
+	// GetCertDir is the directory that contains the server key and certificate.
+	// if not set, webhook server would look up the server key and certificate in
+	// {TempDir}/k8s-webhook-server/serving-certs. The server key and certificate
+	// must be named tls.key and tls.crt, respectively.
+	GetCertDir() string
+}
+
+// DecodeComponentConfigFileInto will load the component config into the runtime.Object
+func DecodeComponentConfigFileInto(codecs serializer.CodecFactory, filePath string, obj runtime.Object) error {
+	content, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+	// Regardless of if the bytes are of any external version,
+	// it will be read successfully and converted into the internal version
+	return runtime.DecodeInto(codecs.UniversalDecoder(), content, obj)
+}
+
+// NewFromComponentConfig will use the component config to generate the manager
+func NewFromComponentConfig(config *rest.Config, scheme *runtime.Scheme, managerconfig ManagerConfiguration) (Manager, error) {
+	options := Options{}
+
+	if scheme != nil {
+		options.Scheme = scheme
+	}
+
+	if managerconfig.GetSyncPeriod() != nil {
+		options.SyncPeriod = managerconfig.GetSyncPeriod()
+	}
+
+	if managerconfig.GetLeaderElection() {
+		options.LeaderElection = managerconfig.GetLeaderElection()
+	}
+
+	if managerconfig.GetLeaderElectionNamespace() != "" {
+		options.LeaderElectionNamespace = managerconfig.GetLeaderElectionNamespace()
+	}
+
+	if managerconfig.GetLeaderElectionID() != "" {
+		options.LeaderElectionID = managerconfig.GetLeaderElectionID()
+	}
+
+	if managerconfig.GetLeaseDuration() != nil {
+		options.LeaseDuration = managerconfig.GetLeaseDuration()
+	}
+
+	if managerconfig.GetRenewDeadline() != nil {
+		options.RenewDeadline = managerconfig.GetRenewDeadline()
+	}
+
+	if managerconfig.GetRetryPeriod() != nil {
+		options.RetryPeriod = managerconfig.GetRetryPeriod()
+	}
+
+	if managerconfig.GetNamespace() != "" {
+		options.Namespace = managerconfig.GetNamespace()
+	}
+
+	if managerconfig.GetMetricsBindAddress() != "" {
+		options.MetricsBindAddress = managerconfig.GetMetricsBindAddress()
+	}
+
+	if managerconfig.GetHealthProbeBindAddress() != "" {
+		options.HealthProbeBindAddress = managerconfig.GetHealthProbeBindAddress()
+	}
+
+	if managerconfig.GetReadinessEndpointName() != "" {
+		options.ReadinessEndpointName = managerconfig.GetReadinessEndpointName()
+	}
+
+	if managerconfig.GetLivenessEndpointName() != "" {
+		options.LivenessEndpointName = managerconfig.GetLivenessEndpointName()
+	}
+
+	if managerconfig.GetPort() != nil {
+		options.Port = *managerconfig.GetPort()
+	}
+
+	if managerconfig.GetHost() != "" {
+		options.Host = managerconfig.GetHost()
+	}
+
+	if managerconfig.GetCertDir() != "" {
+		options.CertDir = managerconfig.GetCertDir()
+	}
+
+	return New(config, options)
 }
 
 // defaultNewClient creates the default caching client
