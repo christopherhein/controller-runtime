@@ -100,6 +100,9 @@ var (
 	// NewManager returns a new Manager for creating Controllers.
 	NewManager = manager.New
 
+	// NewManagerFromComponentConfig allows the use of a standard component config interface
+	NewManagerFromComponentConfig = manager.NewFromComponentConfig
+
 	// CreateOrUpdate creates or updates the given object obj in the Kubernetes
 	// cluster. The object's desired state should be reconciled with the existing
 	// state using the passed in ReconcileFn. obj must be a struct pointer so that
