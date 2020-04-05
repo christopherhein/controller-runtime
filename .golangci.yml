@@ -1,5 +1,7 @@
 run:
   deadline: 5m
+  skip-files:
+  - pkg/api/config/v1alpha1/zz_generated.deepcopy.go
 linters-settings:
   lll:
     line-length: 170

@@ -18,6 +18,7 @@ package manager
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -95,6 +97,55 @@ type Manager interface {
 
 	// GetWebhookServer returns a webhook.Server
 	GetWebhookServer() *webhook.Server
+}
+
+// Configuration defines what the ComponentConfig object for controller
+// runtime needs in order to run
+type Configuration interface {
+	runtime.Object
+
+	// GetSyncPeriod returns the SyncPeriod
+	// Typically ComponentConfig types will store this as matav1.Duration
+	GetSyncPeriod() *time.Duration
+
+	// GetSyncPeriod returns if LeaderElection is turned on
+	GetLeaderElection() *bool
+	// GetLeaderElectionNamespace returns the namespace for LeaderElection
+	GetLeaderElectionNamespace() string
+	// GetLeaderElectionID returns the LeaderElectionID
+	GetLeaderElectionID() string
+
+	// GetLeaseDuration returns the LeaseDuration
+	// Typically ComponentConfig types will store this as matav1.Duration
+	GetLeaseDuration() *time.Duration
+	// GetRenewDeadline returns the RenewDeadline
+	// Typically ComponentConfig types will store this as matav1.Duration
+	GetRenewDeadline() *time.Duration
+	// GetRetryPeriod returns the RetryPeriod
+	// Typically ComponentConfig types will store this as matav1.Duration
+	GetRetryPeriod() *time.Duration
+
+	// GetNamespace returns the Namespace
+	// TODO(christopherhein,joelan) explore adding Plural to support
+	GetNamespace() string
+
+	// GetMetricsBindAddress returns the MetricsBindAddress
+	GetMetricsBindAddress() string
+	// GetHealthProbeBindAddress returns the HealthProbeBindAddress
+	GetHealthProbeBindAddress() string
+
+	// GetReadinessEndpointName returns the ReadinessEndpointName
+	GetReadinessEndpointName() string
+	// GetLivenessEndpointName returns the LivenessEndpointName
+	GetLivenessEndpointName() string
+
+	// GetPort returns the Port
+	GetPort() *int
+	// GetHost returns the Host
+	GetHost() string
+
+	// GetCertDir returns the CertDir
+	GetCertDir() string
 }
 
 // Options are the arguments for creating a new Manager
@@ -314,6 +365,97 @@ func New(config *rest.Config, options Options) (Manager, error) {
 		readinessEndpointName: options.ReadinessEndpointName,
 		livenessEndpointName:  options.LivenessEndpointName,
 	}, nil
+}
+
+// NewOptionsFromComponentConfig returns a populated Options based on the
+// ManagerConfiguation object.
+func NewOptionsFromComponentConfig(scheme *runtime.Scheme, filename string, config Configuration) (options Options, err error) {
+	// Check if Scheme is set
+	if scheme == nil {
+		return options, fmt.Errorf("must specify Scheme")
+	}
+
+	// Check if Configuration is set
+	if config == nil {
+		return options, fmt.Errorf("must specify Configuration")
+	}
+
+	content, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return options, err
+	}
+
+	// Set Scheme
+	options.Scheme = scheme
+
+	// Setup codec factory
+	codecs := serializer.NewCodecFactory(scheme)
+
+	// Regardless of if the bytes are of any external version,
+	// it will be read successfully and converted into the internal version
+	if err := runtime.DecodeInto(codecs.UniversalDecoder(), content, config); err != nil {
+		return options, err
+	}
+
+	options.SyncPeriod = config.GetSyncPeriod()
+
+	if config.GetLeaderElection() != nil {
+		options.LeaderElection = *config.GetLeaderElection()
+	}
+
+	if config.GetLeaderElectionNamespace() != "" {
+		options.LeaderElectionNamespace = config.GetLeaderElectionNamespace()
+	}
+
+	if config.GetLeaderElectionID() != "" {
+		options.LeaderElectionID = config.GetLeaderElectionID()
+	}
+
+	if config.GetLeaseDuration() != nil {
+		options.LeaseDuration = config.GetLeaseDuration()
+	}
+
+	if config.GetRenewDeadline() != nil {
+		options.RenewDeadline = config.GetRenewDeadline()
+	}
+
+	if config.GetRetryPeriod() != nil {
+		options.RetryPeriod = config.GetRetryPeriod()
+	}
+
+	if config.GetNamespace() != "" {
+		options.Namespace = config.GetNamespace()
+	}
+
+	if config.GetMetricsBindAddress() != "" {
+		options.MetricsBindAddress = config.GetMetricsBindAddress()
+	}
+
+	if config.GetHealthProbeBindAddress() != "" {
+		options.HealthProbeBindAddress = config.GetHealthProbeBindAddress()
+	}
+
+	if config.GetReadinessEndpointName() != "" {
+		options.ReadinessEndpointName = config.GetReadinessEndpointName()
+	}
+
+	if config.GetLivenessEndpointName() != "" {
+		options.LivenessEndpointName = config.GetLivenessEndpointName()
+	}
+
+	if config.GetPort() != nil {
+		options.Port = *config.GetPort()
+	}
+
+	if config.GetHost() != "" {
+		options.Host = config.GetHost()
+	}
+
+	if config.GetCertDir() != "" {
+		options.CertDir = config.GetCertDir()
+	}
+
+	return options, nil
 }
 
 // defaultNewClient creates the default caching client

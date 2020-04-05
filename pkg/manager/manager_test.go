@@ -27,12 +27,12 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"
-
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
+	v1alpha1 "sigs.k8s.io/controller-runtime/pkg/api/config/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/cache/informertest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -237,6 +237,48 @@ var _ = Describe("manger.Manager", func() {
 
 			Expect(ln.Close()).ToNot(HaveOccurred())
 		})
+	})
+
+	Describe("NewOptionsFromComponentConfig", func() {
+		It("should return an error if there is no Scheme", func() {
+			_, err := NewOptionsFromComponentConfig(nil, "configname", nil)
+			Expect(err.Error()).To(ContainSubstring("must specify Scheme"))
+		})
+
+		It("should return an error if there is no Configuration", func() {
+			_, err := NewOptionsFromComponentConfig(runtime.NewScheme(), "configname", nil)
+			Expect(err.Error()).To(ContainSubstring("must specify Configuration"))
+		})
+		It("should return an error if there is not a file", func() {
+			_, err := NewOptionsFromComponentConfig(runtime.NewScheme(), "configname", &v1alpha1.GenericControllerConfiguration{})
+			Expect(err.Error()).To(ContainSubstring("no such file or directory"))
+		})
+
+		It("should return config files values for options values", func() {
+			scheme := runtime.NewScheme()
+			_ = v1alpha1.AddToScheme(scheme)
+			cfg := &v1alpha1.GenericControllerConfiguration{}
+
+			opts, err := NewOptionsFromComponentConfig(scheme, "../../examples/config/example.yaml", cfg)
+			Expect(err).To(BeNil())
+
+			Expect(opts.SyncPeriod).To(Equal(cfg.GetSyncPeriod()))
+			Expect(opts.LeaderElection).To(Equal(*cfg.GetLeaderElection()))
+			Expect(opts.LeaderElectionNamespace).To(Equal(cfg.GetLeaderElectionNamespace()))
+			Expect(opts.LeaderElectionID).To(Equal(cfg.GetLeaderElectionID()))
+			Expect(opts.LeaseDuration).To(Equal(cfg.GetLeaseDuration()))
+			Expect(opts.RenewDeadline).To(Equal(cfg.GetRenewDeadline()))
+			Expect(opts.RetryPeriod).To(Equal(cfg.GetRetryPeriod()))
+			Expect(opts.Namespace).To(Equal(cfg.GetNamespace()))
+			Expect(opts.MetricsBindAddress).To(Equal(cfg.GetMetricsBindAddress()))
+			Expect(opts.HealthProbeBindAddress).To(Equal(cfg.GetHealthProbeBindAddress()))
+			Expect(opts.ReadinessEndpointName).To(Equal(cfg.GetReadinessEndpointName()))
+			Expect(opts.LivenessEndpointName).To(Equal(cfg.GetLivenessEndpointName()))
+			Expect(opts.Port).To(Equal(*cfg.GetPort()))
+			Expect(opts.Host).To(Equal(cfg.GetHost()))
+			Expect(opts.CertDir).To(Equal(cfg.GetCertDir()))
+		})
+
 	})
 
 	Describe("Start", func() {

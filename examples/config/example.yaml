@@ -1,0 +1,6 @@
+apiVersion: controller-runtime.config.sigs.k8s.io/v1alpha1
+kind: GenericControllerConfiguration
+port: 9443
+metricsBindAddress: ":8080"
+leaderElection:
+  leaderElect: false
