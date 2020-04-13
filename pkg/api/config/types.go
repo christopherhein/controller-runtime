@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package config
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -74,8 +74,8 @@ type ControllerHealth struct {
 
 // +kubebuilder:object:root=true
 
-// GenericControllerConfiguration is the Schema for the GenericControllerConfigurations API
-type GenericControllerConfiguration struct {
+// ControllerRuntimeConfiguration is the Schema for the GenericControllerConfigurations API
+type ControllerRuntimeConfiguration struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// ControllerConfiguration returns the contfigurations for controllers

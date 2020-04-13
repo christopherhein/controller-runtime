@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"reflect"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -31,9 +32,12 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
+	configv1alpha1 "k8s.io/component-base/config/v1alpha1"
+	apicfg "sigs.k8s.io/controller-runtime/pkg/api/config"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"sigs.k8s.io/controller-runtime/pkg/conversion"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	internalrecorder "sigs.k8s.io/controller-runtime/pkg/internal/recorder"
 	"sigs.k8s.io/controller-runtime/pkg/leaderelection"
@@ -97,55 +101,6 @@ type Manager interface {
 
 	// GetWebhookServer returns a webhook.Server
 	GetWebhookServer() *webhook.Server
-}
-
-// Configuration defines what the ComponentConfig object for controller
-// runtime needs in order to run
-type Configuration interface {
-	runtime.Object
-
-	// GetSyncPeriod returns the SyncPeriod
-	// Typically ComponentConfig types will store this as matav1.Duration
-	GetSyncPeriod() *time.Duration
-
-	// GetSyncPeriod returns if LeaderElection is turned on
-	GetLeaderElection() *bool
-	// GetLeaderElectionNamespace returns the namespace for LeaderElection
-	GetLeaderElectionNamespace() string
-	// GetLeaderElectionID returns the LeaderElectionID
-	GetLeaderElectionID() string
-
-	// GetLeaseDuration returns the LeaseDuration
-	// Typically ComponentConfig types will store this as matav1.Duration
-	GetLeaseDuration() *time.Duration
-	// GetRenewDeadline returns the RenewDeadline
-	// Typically ComponentConfig types will store this as matav1.Duration
-	GetRenewDeadline() *time.Duration
-	// GetRetryPeriod returns the RetryPeriod
-	// Typically ComponentConfig types will store this as matav1.Duration
-	GetRetryPeriod() *time.Duration
-
-	// GetNamespace returns the Namespace
-	// TODO(christopherhein,joelan) explore adding Plural to support
-	GetNamespace() string
-
-	// GetMetricsBindAddress returns the MetricsBindAddress
-	GetMetricsBindAddress() string
-	// GetHealthProbeBindAddress returns the HealthProbeBindAddress
-	GetHealthProbeBindAddress() string
-
-	// GetReadinessEndpointName returns the ReadinessEndpointName
-	GetReadinessEndpointName() string
-	// GetLivenessEndpointName returns the LivenessEndpointName
-	GetLivenessEndpointName() string
-
-	// GetPort returns the Port
-	GetPort() *int
-	// GetHost returns the Host
-	GetHost() string
-
-	// GetCertDir returns the CertDir
-	GetCertDir() string
 }
 
 // Options are the arguments for creating a new Manager
@@ -369,14 +324,14 @@ func New(config *rest.Config, options Options) (Manager, error) {
 
 // NewOptionsFromComponentConfig returns a populated Options based on the
 // ManagerConfiguation object.
-func NewOptionsFromComponentConfig(scheme *runtime.Scheme, filename string, config Configuration) (options Options, err error) {
+func NewOptionsFromComponentConfig(scheme *runtime.Scheme, filename string, object conversion.Convertible) (options Options, err error) {
 	// Check if Scheme is set
 	if scheme == nil {
 		return options, fmt.Errorf("must specify Scheme")
 	}
 
-	// Check if Configuration is set
-	if config == nil {
+	// Check if convertible object is set
+	if object == nil {
 		return options, fmt.Errorf("must specify Configuration")
 	}
 
@@ -393,67 +348,44 @@ func NewOptionsFromComponentConfig(scheme *runtime.Scheme, filename string, conf
 
 	// Regardless of if the bytes are of any external version,
 	// it will be read successfully and converted into the internal version
-	if err := runtime.DecodeInto(codecs.UniversalDecoder(), content, config); err != nil {
+	if err := runtime.DecodeInto(codecs.UniversalDecoder(), content, object); err != nil {
 		return options, err
 	}
 
-	options.SyncPeriod = config.GetSyncPeriod()
-
-	if config.GetLeaderElection() != nil {
-		options.LeaderElection = *config.GetLeaderElection()
+	config := apicfg.ControllerRuntimeConfiguration{}
+	if err := object.ConvertTo(&config); err != nil {
+		return options, err
 	}
 
-	if config.GetLeaderElectionNamespace() != "" {
-		options.LeaderElectionNamespace = config.GetLeaderElectionNamespace()
+	if config.SyncPeriod != nil {
+		options.SyncPeriod = &config.SyncPeriod.Duration
 	}
 
-	if config.GetLeaderElectionID() != "" {
-		options.LeaderElectionID = config.GetLeaderElectionID()
+	if !reflect.DeepEqual(config.LeaderElection, configv1alpha1.LeaderElectionConfiguration{}) {
+		if config.LeaderElection.LeaderElect != nil {
+			options.LeaderElection = *config.LeaderElection.LeaderElect
+		}
+		options.LeaderElectionNamespace = config.LeaderElection.ResourceNamespace
+		options.LeaderElectionID = config.LeaderElection.ResourceName
+		options.LeaseDuration = &config.LeaderElection.LeaseDuration.Duration
+		options.RenewDeadline = &config.LeaderElection.RenewDeadline.Duration
+		options.RetryPeriod = &config.LeaderElection.RetryPeriod.Duration
 	}
 
-	if config.GetLeaseDuration() != nil {
-		options.LeaseDuration = config.GetLeaseDuration()
+	options.Namespace = config.Namespace
+	options.MetricsBindAddress = config.MetricsBindAddress
+
+	if !reflect.DeepEqual(config.Health, apicfg.ControllerHealth{}) {
+		options.HealthProbeBindAddress = config.Health.HealthProbeBindAddress
+		options.ReadinessEndpointName = config.Health.ReadinessEndpointName
+		options.LivenessEndpointName = config.Health.LivenessEndpointName
 	}
 
-	if config.GetRenewDeadline() != nil {
-		options.RenewDeadline = config.GetRenewDeadline()
+	if config.Port != nil {
+		options.Port = *config.Port
 	}
-
-	if config.GetRetryPeriod() != nil {
-		options.RetryPeriod = config.GetRetryPeriod()
-	}
-
-	if config.GetNamespace() != "" {
-		options.Namespace = config.GetNamespace()
-	}
-
-	if config.GetMetricsBindAddress() != "" {
-		options.MetricsBindAddress = config.GetMetricsBindAddress()
-	}
-
-	if config.GetHealthProbeBindAddress() != "" {
-		options.HealthProbeBindAddress = config.GetHealthProbeBindAddress()
-	}
-
-	if config.GetReadinessEndpointName() != "" {
-		options.ReadinessEndpointName = config.GetReadinessEndpointName()
-	}
-
-	if config.GetLivenessEndpointName() != "" {
-		options.LivenessEndpointName = config.GetLivenessEndpointName()
-	}
-
-	if config.GetPort() != nil {
-		options.Port = *config.GetPort()
-	}
-
-	if config.GetHost() != "" {
-		options.Host = config.GetHost()
-	}
-
-	if config.GetCertDir() != "" {
-		options.CertDir = config.GetCertDir()
-	}
+	options.Host = config.Host
+	options.CertDir = config.CertDir
 
 	return options, nil
 }
